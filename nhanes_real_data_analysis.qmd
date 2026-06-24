@@ -1,0 +1,345 @@
+---
+title: "nhanes_real_data_analysis"
+format: html
+editor: visual
+---
+
+```{r}
+library(tidyverse)
+library(refund)
+library(mgcv)
+library(tidyfun)
+library(patchwork)
+library(broom)
+library(viridis)
+library(splines)
+library(splines2)
+library(refundr)
+library(gridExtra)
+```
+
+```{r}
+all_df <- read_rds('nhanes_analysis/saved_results/nhanes_real_data_clean.rds') %>%
+  mutate(extreme_vals = if_any(c(3:1443), ~.x >60)) %>%
+  filter(extreme_vals == FALSE) %>%
+  dplyr::select(-extreme_vals)
+```
+
+## Exploratory analysis
+
+```{r}
+df <- all_df %>%
+  dplyr::select(-seq(1, 1441))
+mims <- all_df %>%
+  dplyr::select(seq(2, 1441)) %>%
+  as.matrix()
+df$mims <- mims
+```
+
+### Morality models
+
+#### Penalized splines
+
+```{r}
+pfr_mort_fit = 
+  pfr(mort5yr ~ age + gender + bmi + race_2 + race_3 +race_4+race_6+race_7+educ_2+educ_3+chf+chd+heart_attack+stroke+diabetes+health_cond_2+health_cond_3+health_cond_4+health_cond_5+drink_former+drink_mod+drink_heavy+smoke_never+smoke_former+pfq+
+      lf(mims, argvals = seq(1/60, 24, length = 1440)),
+    family = binomial(), method = "REML", data = df)
+```
+
+## Supplementary Figure 9
+
+```{r}
+pfr_mort_inf_df = 
+  coef(pfr_mort_fit) %>% 
+  rename(estimate = value) %>% 
+  mutate(
+    method = "pfr_adj",
+    ub = estimate + 1.96 * se,
+    lb = estimate - 1.96 * se) %>%
+  as.data.frame()
+
+color_vals <- c(viridis(1, begin = 0.7, end = 0.7), magma(1, begin = 0.7, end = 0.7), plasma(1, begin = 0.1, end = 0.1))
+pfr_mort_inf_df %>% 
+  ggplot(aes(x = mims.argvals, y = estimate)) + 
+  geom_vline(aes(xintercept = 7), color = color_vals[1], linetype = 3, linewidth= 1.3) +
+  geom_vline(aes(xintercept = 10), color = color_vals[1], linetype = 3, linewidth= 1.3) +
+  geom_vline(aes(xintercept = 13), color = color_vals[2], linetype = 3, linewidth= 1.3) +
+  geom_vline(aes(xintercept = 16), color = color_vals[2], linetype = 3, linewidth= 1.3) +
+  geom_vline(aes(xintercept = 17), color = color_vals[3], linetype = 3, linewidth= 1.3) +
+  geom_vline(aes(xintercept = 20), color = color_vals[3], linetype = 3, linewidth= 1.3) +
+  geom_hline(aes(yintercept = 0), linetype = 2, color = 'grey50') +
+  geom_ribbon(aes(ymax = ub, ymin = lb),fill  = 'grey80', alpha = 0.7) +
+  geom_line(linewidth = 1.2, color = 'black') +
+  theme_classic() +
+  scale_x_continuous(
+    breaks = seq(0, 24, length = 5),
+    labels = str_c(seq(0, 24, length = 5), ":00")) + 
+  labs(x = "Time of day (hours)", y = "Coefficient from SoFR")
+```
+
+## Analysis results
+
+Calculate estimates and CIs from results
+
+### 7AM-10AM
+
+```{r}
+mod_df1 <- read_rds('nhanes_analysis/saved_results/model_run_data/mod_df1_7_10.rds')
+mod_df2 <- read_rds('nhanes_analysis/saved_results/model_run_data/mod_df2_7_10.rds')
+y1 <- mod_df1$y
+y2 <- mod_df2$y
+res1 <- read_rds('nhanes_analysis/saved_results/model_res/mods1_7_10.rds')
+res2 <- read_rds('nhanes_analysis/saved_results/model_res/mods2_7_10.rds')
+delta_vec <- c(seq(0.005, 0.05, by = 0.0025))
+
+w1 <- res2$w
+w2 <- res1$w
+xi1 <- res2$xi
+xi2 <- res1$xi
+mu1 <- res2$mu_pred
+mu2 <- res1$mu_pred
+y2_1 <- res2$y2_pred
+y2_2 <- res1$y2_pred
+xi1_squared <- res2$xi_squared
+xi2_squared <- res1$xi_squared
+
+k <- length(delta_vec)
+dr_norm <- sapply(seq(1, k), function(j){
+    mean(c(w1[[j]]*(y1-xi1[[j]])/mean(w1[[j]])+ xi1[[j]], w2[[j]]*(y2-xi2[[j]])/mean(w2[[j]]) + xi2[[j]]))
+  })
+diff <- dr_norm - mean(c(y1, y2))
+var_contrast_est2 <- sapply(seq(1, k), function(j){
+    mean(c(((w1[[j]]/mean(w1[[j]]))^2 - 1)*(y2_1 - mu1^2) + ((w1[[j]]/mean(w1[[j]]))^2)*((mu1 - xi1[[j]])^2), ((w2[[j]]/mean(w2[[j]]))^2 - 1)*(y2_2 - mu2^2) + ((w2[[j]]/mean(w2[[j]]))^2)*((mu2 - xi2[[j]])^2))) + var(c(mu1, mu2) - c(xi1[[j]], xi2[[j]])) - 2*mean(c(xi1_squared[[j]], xi2_squared[[j]])-c(xi1[[j]], xi2[[j]])^2)
+  })/nrow(all_df)
+
+lb <- sapply(seq(1, length(delta_vec)), function(i){
+  diff[i] - qnorm(0.975)*sqrt(var_contrast_est2[i])
+})
+
+ub <- sapply(seq(1, length(delta_vec)), function(i){
+  diff[i] + qnorm(0.975)*sqrt(var_contrast_est2[i])
+})
+
+df_7_10 <- cbind('type' = '7AM-10AM', delta_vec = delta_vec, 'est' = diff*100, 'lb' = lb*100, 'ub' = ub*100)
+```
+
+### 1- 4PM
+
+```{r}
+mod_df1 <- read_rds('nhanes_analysis/saved_results/model_run_data/mod_df1_1_4.rds')
+mod_df2 <- read_rds('nhanes_analysis/saved_results/model_run_data/mod_df2_1_4.rds')
+y1 <- mod_df1$y
+y2 <- mod_df2$y
+res1 <- read_rds('nhanes_analysis/saved_results/model_res/mods1_1_4.rds')
+res2 <- read_rds('nhanes_analysis/saved_results/model_res/mods2_1_4.rds')
+delta_vec <- c(seq(0.005, 0.05, by = 0.0025))
+
+w1 <- res2$w
+w2 <- res1$w
+xi1 <- res2$xi
+xi2 <- res1$xi
+mu1 <- res2$mu_pred
+mu2 <- res1$mu_pred
+y2_1 <- res2$y2_pred
+y2_2 <- res1$y2_pred
+xi1_squared <- res2$xi_squared
+xi2_squared <- res1$xi_squared
+
+k <- length(delta_vec)
+dr_norm <- sapply(seq(1, k), function(j){
+    mean(c(w1[[j]]*(y1-xi1[[j]])/mean(w1[[j]])+ xi1[[j]], w2[[j]]*(y2-xi2[[j]])/mean(w2[[j]]) + xi2[[j]]))
+  })
+diff <- dr_norm - mean(c(y1, y2))
+var_contrast_est2 <- sapply(seq(1, k), function(j){
+    mean(c(((w1[[j]]/mean(w1[[j]]))^2 - 1)*(y2_1 - mu1^2) + ((w1[[j]]/mean(w1[[j]]))^2)*((mu1 - xi1[[j]])^2), ((w2[[j]]/mean(w2[[j]]))^2 - 1)*(y2_2 - mu2^2) + ((w2[[j]]/mean(w2[[j]]))^2)*((mu2 - xi2[[j]])^2))) + var(c(mu1, mu2) - c(xi1[[j]], xi2[[j]])) - 2*mean(c(xi1_squared[[j]], xi2_squared[[j]])-c(xi1[[j]], xi2[[j]])^2)
+  })/nrow(all_df)
+
+lb <- sapply(seq(1, length(delta_vec)), function(i){
+  diff[i] - qnorm(0.975)*sqrt(var_contrast_est2[i])
+})
+
+ub <- sapply(seq(1, length(delta_vec)), function(i){
+  diff[i] + qnorm(0.975)*sqrt(var_contrast_est2[i])
+})
+
+df_1_4 <- cbind('type' = '1PM-4PM', delta_vec = delta_vec, 'est' = diff*100, 'lb' = lb*100, 'ub' = ub*100)
+```
+
+### 5PM-8PM
+
+```{r}
+mod_df1 <- read_rds('nhanes_analysis/saved_results/model_run_data/mod_df1_5_8.rds')
+mod_df2 <- read_rds('nhanes_analysis/saved_results/model_run_data/mod_df2_5_8.rds')
+y1 <- mod_df1$y
+y2 <- mod_df2$y
+res1 <- read_rds('nhanes_analysis/saved_results/model_res/mods1_5_8.rds')
+res2 <- read_rds('nhanes_analysis/saved_results/model_res/mods2_5_8.rds')
+delta_vec <- c(seq(0.005, 0.05, by = 0.0025))
+
+w1 <- res2$w
+w2 <- res1$w
+xi1 <- res2$xi
+xi2 <- res1$xi
+mu1 <- res2$mu_pred
+mu2 <- res1$mu_pred
+y2_1 <- res2$y2_pred
+y2_2 <- res1$y2_pred
+xi1_squared <- res2$xi_squared
+xi2_squared <- res1$xi_squared
+
+k <- length(delta_vec)
+dr_norm <- sapply(seq(1, k), function(j){
+    mean(c(w1[[j]]*(y1-xi1[[j]])/mean(w1[[j]])+ xi1[[j]], w2[[j]]*(y2-xi2[[j]])/mean(w2[[j]]) + xi2[[j]]))
+  })
+diff <- dr_norm - mean(c(y1, y2))
+var_contrast_est2 <- sapply(seq(1, k), function(j){
+    mean(c(((w1[[j]]/mean(w1[[j]]))^2 - 1)*(y2_1 - mu1^2) + ((w1[[j]]/mean(w1[[j]]))^2)*((mu1 - xi1[[j]])^2), ((w2[[j]]/mean(w2[[j]]))^2 - 1)*(y2_2 - mu2^2) + ((w2[[j]]/mean(w2[[j]]))^2)*((mu2 - xi2[[j]])^2))) + var(c(mu1, mu2) - c(xi1[[j]], xi2[[j]])) - 2*mean(c(xi1_squared[[j]], xi2_squared[[j]])-c(xi1[[j]], xi2[[j]])^2)
+  })/nrow(all_df)
+
+lb <- sapply(seq(1, length(delta_vec)), function(i){
+  diff[i] - qnorm(0.975)*sqrt(var_contrast_est2[i])
+})
+
+ub <- sapply(seq(1, length(delta_vec)), function(i){
+  diff[i] + qnorm(0.975)*sqrt(var_contrast_est2[i])
+})
+
+df_5_8 <- cbind('type' = '5PM-8PM', delta_vec = delta_vec, 'est' = diff*100, 'lb' = lb*100, 'ub' = ub*100)
+```
+
+```{r}
+res_df <- rbind(df_7_10, df_1_4, df_5_8)
+```
+
+## Viz difference estimates
+
+```{r}
+plot_df1 <- as.data.frame(res_df) %>%
+  filter(delta_vec %in% seq(0.0075, 0.05, by = 0.0025)) %>%
+  mutate(type = factor(type, levels = c('7AM-10AM', '1PM-4PM', '5PM-8PM')))
+
+plot_df2 <- as.data.frame(res_df) %>%
+  filter(delta_vec %in% seq(0.0075, 0.0225, by = 0.0025)) %>%
+  mutate(type = factor(type, levels = c('7AM-10AM', '1PM-4PM', '5PM-8PM')))
+
+agg_df_7_10 <- read_rds('nhanes_analysis/saved_results/step_data_7_10.rds')
+agg_df_7_10_join <- agg_df_7_10 %>%
+  filter(type != 'est_mean') %>%
+  group_by(type) %>%
+  summarise(x = median(step_diff)) %>%
+  rename(delta_vec = type) %>%
+  mutate(type = '7AM-10AM')
+
+agg_df_1_4 <- read_rds('nhanes_analysis/saved_results/step_data_1_4.rds')
+agg_df_1_4_join <- agg_df_1_4 %>%
+  filter(type != 'est_mean') %>%
+  group_by(type) %>%
+  summarise(x = median(step_diff)) %>%
+  rename(delta_vec = type) %>%
+  mutate(type = '1PM-4PM')
+
+agg_df_5_8 <- read_rds('nhanes_analysis/saved_results/step_data_5_8.rds')
+agg_df_5_8_join <- agg_df_5_8 %>%
+  filter(type != 'est_mean') %>%
+  group_by(type) %>%
+  summarise(x = median(step_diff)) %>%
+  rename(delta_vec = type) %>%
+  mutate(type = '5PM-8PM')
+
+
+join_df <- rbind(agg_df_7_10_join, agg_df_1_4_join, agg_df_5_8_join)
+
+plot_df3 <- as.data.frame(res_df) %>%
+  filter(delta_vec %in% seq(0.0075, 0.0225, by = 0.0025)) %>%
+  left_join(join_df) %>%
+  mutate(type = factor(type, levels = c('7AM-10AM', '1PM-4PM', '5PM-8PM'))) 
+```
+
+## Supplementary Figure 10
+
+```{r}
+p1 <- ggplot(plot_df1, aes(x = as.numeric(delta_vec), y = as.numeric(est), color = type, fill = type)) +
+  geom_rect(aes(xmin = 0.0075,  xmax = 0.0225, ymin = -2.5, ymax = 1), alpha = 0.02, fill = 'grey70', color = 'grey40', linewidth= 0.4) +
+  geom_line() +
+  geom_hline(aes(yintercept = 0)) +
+  geom_ribbon(aes(ymin = as.numeric(lb), ymax = as.numeric(ub)), alpha = 0.2) +
+  theme_classic() +
+  scale_color_manual(values = c(viridis(1, begin = 0.7, end = 0.7), magma(1, begin = 0.7, end = 0.7), plasma(1, begin = 0.1, end = 0.1)) )+
+  scale_fill_manual(values = c(viridis(1, begin = 0.7, end = 0.7), magma(1, begin = 0.7, end = 0.7), plasma(1, begin = 0.1, end = 0.1)) )+
+  labs(x =  expression(delta), y = 'Treatment Effect and 95% CI') +
+  guides(fill="none", color = "none") + 
+  facet_wrap(~type)
+p1
+```
+
+## Figure 5
+
+```{r}
+p4 <- ggplot(plot_df2, aes(x = as.numeric(delta_vec), y = as.numeric(est), color = type, fill = type)) +
+  geom_line() +
+  geom_hline(aes(yintercept = 0)) +
+  geom_ribbon(aes(ymin = as.numeric(lb), ymax = as.numeric(ub)), alpha = 0.2) +
+  scale_color_manual(values = c(viridis(1, begin = 0.7, end = 0.7), magma(1, begin = 0.7, end = 0.7), plasma(1, begin = 0.1, end = 0.1)) )+
+  scale_fill_manual(values = c(viridis(1, begin = 0.7, end = 0.7), magma(1, begin = 0.7, end = 0.7), plasma(1, begin = 0.1, end = 0.1)) )+
+  theme_classic() +
+  labs(x =  expression(delta), y = 'Treatment Effect and 95% CI') +
+  guides(fill="none", color = "none") + 
+  facet_wrap(~type)
+
+p5 <- ggplot(plot_df3, aes(x = x, y = as.numeric(est), color = type, fill = type)) +
+  geom_line() +
+  geom_hline(aes(yintercept = 0)) +
+  geom_ribbon(aes(ymin = as.numeric(lb), ymax = as.numeric(ub)), alpha = 0.2) +
+  scale_color_manual(values = c(viridis(1, begin = 0.7, end = 0.7), magma(1, begin = 0.7, end = 0.7), plasma(1, begin = 0.1, end = 0.1)) )+
+  scale_fill_manual(values = c(viridis(1, begin = 0.7, end = 0.7), magma(1, begin = 0.7, end = 0.7), plasma(1, begin = 0.1, end = 0.1)) )+
+  theme_classic() +
+  labs(x =  'Median Step Count Increase for Expected Value of Q', y = 'Treatment Effect and 95% CI') +
+  guides(fill="none", color = "none") + 
+  theme_classic() +
+  facet_wrap(~type)
+
+p_final2 <- grid.arrange(p4, p5, ncol=1)
+p_final2
+```
+
+## Supplementary Figure 11
+
+```{r}
+cov_join <- all_df %>%
+  dplyr::select(-seq(2, 1441))
+
+agg_df_1_4_cov <- agg_df_1_4 %>%
+  mutate(SEQN = as.double(SEQN)) %>%
+  left_join(cov_join) %>%
+  mutate(age_cat = ifelse(age < 35, '< 35 years', ifelse(age < 50, '35-50 years', ifelse(age < 65, '50-65 years', '> 65 years')))) %>%
+  mutate(type2 = '1PM-4PM')
+
+agg_df_7_10_cov <- agg_df_7_10 %>%
+  mutate(SEQN = as.double(SEQN)) %>%
+  left_join(cov_join) %>%
+  mutate(age_cat = ifelse(age < 35, '< 35 years', ifelse(age < 50, '35-50 years', ifelse(age < 65, '50-65 years', '> 65 years')))) %>%
+  mutate(type2 = '7AM-10AM')
+
+agg_df_5_8_cov <- agg_df_5_8 %>%
+  mutate(SEQN = as.double(SEQN)) %>%
+  left_join(cov_join) %>%
+  mutate(age_cat = ifelse(age < 35, '< 35 years', ifelse(age < 50, '35-50 years', ifelse(age < 65, '50-65 years', '> 65 years')))) %>%
+  mutate(type2 = '5PM-8PM')
+
+agg_cov_plot <- rbind(agg_df_1_4_cov, agg_df_7_10_cov, agg_df_5_8_cov) %>%
+  filter(type != 'est_mean') %>%
+  mutate(type2 = factor(type2, levels = c('7AM-10AM', '1PM-4PM', '5PM-8PM'))) %>%
+  mutate(age_cat = factor(age_cat, levels = c('< 35 years', '35-50 years', '50-65 years', '> 65 years'))) %>%
+  filter(type %in% c("0.02")) %>%
+  mutate(pfq = ifelse(pfq == 1, 'Yes', 'No'))
+
+ggplot(agg_cov_plot, aes(x = type, y = step_diff, fill = age_cat, color = as.factor(pfq))) +
+  geom_boxplot(outliers = FALSE, position = position_dodge(width = 1)) +
+  labs(y =  'Step Count Increase for Expected Value of Q', x = '', fill = 'Age', color = 'Mobility Problem') +
+  scale_fill_viridis(option = 'magma', begin = 0.2, end = 0.8, discrete = T) +
+  scale_color_manual(values = c('black', 'grey60')) +
+  theme_classic() +
+  theme(legend.position = 'bottom', axis.text.x = element_blank(), axis.ticks.x = element_blank())+
+  facet_wrap(~type2, nrow = 1, scales = 'free')
+```

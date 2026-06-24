@@ -1,0 +1,263 @@
+---
+title: "sim_paper_plots"
+format: html
+editor: visual
+---
+
+```{r}
+library(tidyverse)
+library(MASS)
+library(viridis)
+```
+
+# Q
+
+```{r}
+agg_df <- read_rds('simulations/saved_results/n1000_q_mu.rds')
+agg_df2 <- read_rds('simulations/saved_results/n1000_q_tau.rds')
+```
+
+### Figure 4
+
+```{r}
+plot_df1 <- agg_df %>%
+  filter(q_sd == 10 & type == 'est_fpca' & corr == 0 & pve == 0.99 & b1 == 2)  %>%
+  pivot_longer(cols = c('abs_perc_bias', 'var_est', 'ci1')) %>%
+  mutate(name = ifelse(name == 'abs_perc_bias', 'Absolute % Bias',
+                       ifelse(name == 'var_est', 'Average Variance Estimate', 'Coverage'))) %>%
+  mutate(b1 = paste0('# of [0, t1] functions: ', b1)) %>%
+  mutate(yint = ifelse(name == 'Coverage', 0.95, NA)) %>%
+  mutate(name = factor(name, levels = c('Absolute % Bias','Average Variance Estimate', 'Coverage'))) %>%
+  mutate(emp_sd_var_est = ifelse(name == 'Average Variance Estimate', emp_sd_var_est, NA))
+  
+  
+ggplot(plot_df1, aes(x = as.factor(b3), color = as.factor(delta))) +
+  geom_point(aes(y = value)) +
+  geom_hline(aes(yintercept = yint), linetype = 2) +
+  geom_line(aes(y = value, group = interaction(as.factor(delta), as.factor(name), as.factor(b1)))) +
+  geom_line(aes(y = emp_sd_var_est, group = interaction(as.factor(delta), as.factor(name), as.factor(b1))), linetype = 3) +
+  theme_bw() +
+  labs(x = '# of (t2, T] basis functions', y = 'Value', color = expression(delta)) +
+  scale_color_viridis(option = 'magma', begin = 0.2, end = 0.8, discrete = T) +
+  theme(strip.background = element_rect(fill="white"), legend.position = 'bottom') +
+  guides(color = guide_legend(nrow = 1)) +
+  facet_wrap(~as.factor(name), scales = 'free')
+```
+
+### Supplementary Figure 2
+
+```{r}
+plot_df2 <- agg_df %>%
+  filter(q_sd == 10 & type == 'est_fpca' & corr == 0 & pve == 0.99 & b1 == 8)  %>%
+  pivot_longer(cols = c('abs_perc_bias', 'var_est', 'ci1')) %>%
+  mutate(name = ifelse(name == 'abs_perc_bias', 'Absolute % Bias',
+                       ifelse(name == 'var_est', 'Average Variance Estimate', 'Coverage'))) %>%
+  mutate(b1 = paste0('# of [0, t1] functions: ', b1)) %>%
+  mutate(yint = ifelse(name == 'Coverage', 0.95, NA)) %>%
+  mutate(name = factor(name, levels = c('Absolute % Bias','Average Variance Estimate', 'Coverage'))) %>%
+  mutate(emp_sd_var_est = ifelse(name == 'Average Variance Estimate', emp_sd_var_est, NA))
+  
+ggplot(plot_df2, aes(x = as.factor(b3), color = as.factor(delta))) +
+  geom_point(aes(y = value)) +
+  geom_hline(aes(yintercept = yint), linetype = 2) +
+  geom_line(aes(y = value, group = interaction(as.factor(delta), as.factor(name), as.factor(b1)))) +
+  geom_line(aes(y = emp_sd_var_est, group = interaction(as.factor(delta), as.factor(name), as.factor(b1))), linetype = 3) +
+  theme_bw() +
+  labs(x = '# of (t2, T] basis functions', y = 'Value', color = expression(delta)) +
+  scale_color_viridis(option = 'magma', begin = 0.2, end = 0.8, discrete = T) +
+  theme(strip.background = element_rect(fill="white"), legend.position = 'bottom') +
+  guides(color = guide_legend(nrow = 1)) +
+  facet_wrap(~as.factor(name), scales = 'free')
+```
+
+### Supplementary Figure 3
+
+```{r}
+plot_df3 <- agg_df %>%
+  filter(q_sd == 10 & type == 'est_fpca' & corr == 0 & pve == 0.999 & b1 == 2)  %>%
+  pivot_longer(cols = c('abs_perc_bias', 'var_est', 'ci1')) %>%
+  mutate(name = ifelse(name == 'abs_perc_bias', 'Absolute % Bias',
+                       ifelse(name == 'var_est', 'Average Variance Estimate', 'Coverage'))) %>%
+  mutate(b1 = paste0('# of [0, t1] functions: ', b1)) %>%
+  mutate(yint = ifelse(name == 'Coverage', 0.95, NA)) %>%
+  mutate(name = factor(name, levels = c('Absolute % Bias','Average Variance Estimate', 'Coverage'))) %>%
+  mutate(emp_sd_var_est = ifelse(name == 'Average Variance Estimate', emp_sd_var_est, NA))
+  
+ggplot(plot_df3, aes(x = as.factor(b3), color = as.factor(delta))) +
+  geom_point(aes(y = value)) +
+  geom_hline(aes(yintercept = yint), linetype = 2) +
+  geom_line(aes(y = value, group = interaction(as.factor(delta), as.factor(name), as.factor(b1)))) +
+  geom_line(aes(y = emp_sd_var_est, group = interaction(as.factor(delta), as.factor(name), as.factor(b1))), linetype = 3) +
+  theme_bw() +
+  labs(x = '# of (t2, T] basis functions', y = 'Value', color = expression(delta)) +
+  scale_color_viridis(option = 'magma', begin = 0.2, end = 0.8, discrete = T) +
+  theme(strip.background = element_rect(fill="white"), legend.position = 'bottom') +
+  guides(color = guide_legend(nrow = 1)) +
+   facet_wrap(~as.factor(name), scales = 'free')
+```
+
+### Supplementary Figure 4
+
+```{r}
+plot_df12 <- agg_df %>%
+  filter(q_sd == 12 & type == 'est_fpca' & corr == 0 & pve == 0.99 & b1 == 2)  %>%
+  pivot_longer(cols = c('abs_perc_bias', 'var_est', 'ci1')) %>%
+  mutate(name = ifelse(name == 'abs_perc_bias', 'Absolute % Bias',
+                       ifelse(name == 'var_est', 'Average Variance Estimate', 'Coverage'))) %>%
+  mutate(b1 = paste0('# of [0, t1] functions: ', b1)) %>%
+  mutate(yint = ifelse(name == 'Coverage', 0.95, NA)) %>%
+  mutate(name = factor(name, levels = c('Absolute % Bias','Average Variance Estimate', 'Coverage'))) %>%
+  mutate(emp_sd_var_est = ifelse(name == 'Average Variance Estimate', emp_sd_var_est, NA))
+  
+ggplot(plot_df12, aes(x = as.factor(b3), color = as.factor(delta))) +
+  geom_point(aes(y = value)) +
+  geom_hline(aes(yintercept = yint), linetype = 2) +
+  geom_line(aes(y = value, group = interaction(as.factor(delta), as.factor(name), as.factor(b1)))) +
+  geom_line(aes(y = emp_sd_var_est, group = interaction(as.factor(delta), as.factor(name), as.factor(b1))), linetype = 3) +
+  theme_bw() +
+  labs(x = '# of (t2, T] basis functions', y = 'Value', color = expression(delta)) +
+  scale_color_viridis(option = 'magma', begin = 0.2, end = 0.8, discrete = T) +
+  theme(strip.background = element_rect(fill="white"), legend.position = 'bottom') +
+  guides(color = guide_legend(nrow = 1)) +
+  facet_wrap(~as.factor(name), scales = 'free')
+```
+
+### Supplementary Figure 5
+
+```{r}
+plot_df4 <- agg_df2 %>%
+  filter(q_sd == 10 & type == 'est_fpca' & corr == 0 & pve == 0.99 & b1 ==2)  %>%
+  pivot_longer(cols = c('abs_perc_bias', 'var_est', 'ci1')) %>%
+  mutate(name = ifelse(name == 'abs_perc_bias', 'Absolute % Bias',
+                       ifelse(name == 'var_est', 'Average Variance Estimate', 'Coverage'))) %>%
+  mutate(b1 = paste0('# of [0, t1] functions: ', b1)) %>%
+  mutate(yint = ifelse(name == 'Coverage', 0.95, NA)) %>%
+  mutate(name = factor(name, levels = c('Absolute % Bias','Average Variance Estimate', 'Coverage'))) %>%
+  mutate(emp_sd_var_est = ifelse(name == 'Average Variance Estimate', emp_sd_var_est, NA))
+  
+  
+ggplot(plot_df4, aes(x = as.factor(b3), color = as.factor(delta))) +
+  geom_point(aes(y = value)) +
+  geom_hline(aes(yintercept = yint), linetype = 2) +
+  geom_line(aes(y = value, group = interaction(as.factor(delta), as.factor(name), as.factor(b1)))) +
+  geom_line(aes(y = emp_sd_var_est, group = interaction(as.factor(delta), as.factor(name), as.factor(b1))), linetype = 3) +
+  theme_bw() +
+  labs(x = '# of (t2, T] basis functions', y = 'Value', color = expression(delta)) +
+  scale_color_viridis(option = 'magma', begin = 0.2, end = 0.8, discrete = T) +
+  theme(strip.background = element_rect(fill="white"), legend.position = 'bottom') +
+  guides(color = guide_legend(nrow = 1)) +
+  facet_wrap(~as.factor(name), scales = 'free')
+```
+
+# Q\*
+
+```{r}
+agg_df3 <- read_rds('simulations/saved_results/n1000_qstar_mu.rds')
+```
+
+### Supplementary Figure 6
+
+```{r}
+plot_df7 <- agg_df3 %>%
+  filter(q_sd == 10 & type == 'est_fpca' & b3_sd == 1 & b3_coef == 0 & b1 == 2)  %>%
+  pivot_longer(cols = c('abs_perc_bias', 'var_est', 'ci1')) %>%
+  mutate(name = ifelse(name == 'abs_perc_bias', 'Absolute % Bias',
+                       ifelse(name == 'var_est', 'Average Variance Estimate', 'Coverage'))) %>%
+  mutate(b1 = paste0('# of [0, t1] functions: ', b1)) %>%
+  mutate(yint = ifelse(name == 'Coverage', 0.95, NA)) %>%
+  mutate(name = factor(name, levels = c('Absolute % Bias','Average Variance Estimate', 'Coverage'))) %>%
+  mutate(emp_sd_var_est = ifelse(name == 'Average Variance Estimate', emp_sd_var_est, NA))
+  
+  
+ggplot(plot_df7, aes(x = as.factor(b3), color = as.factor(delta))) +
+  geom_point(aes(y = value)) +
+  geom_hline(aes(yintercept = yint), linetype = 2) +
+  geom_line(aes(y = value, group = interaction(as.factor(delta), as.factor(name), as.factor(b1)))) +
+  geom_line(aes(y = emp_sd_var_est, group = interaction(as.factor(delta), as.factor(name), as.factor(b1))), linetype = 3) +
+  theme_bw() +
+  labs(x = '# of (t2, T] basis functions', y = 'Value', color = expression(delta)) +
+  scale_color_viridis(option = 'magma', begin = 0.2, end = 0.8, discrete = T) +
+  theme(strip.background = element_rect(fill="white"), legend.position = 'bottom') +
+  guides(color = guide_legend(nrow = 1)) +
+  facet_wrap(~as.factor(name), scales = 'free')
+```
+
+### Supplementary Figure 7
+
+```{r}
+plot_df9 <- agg_df3 %>%
+  filter(q_sd == 10 & type == 'est_fpca' & b3 == 2 & b1 == 2 & b3_coef == 3)  %>%
+  pivot_longer(cols = c('abs_perc_bias', 'var_est', 'ci1')) %>%
+  mutate(name = ifelse(name == 'abs_perc_bias', 'Absolute % Bias',
+                       ifelse(name == 'var_est', 'Average Variance Estimate', 'Coverage'))) %>%
+  mutate(yint = ifelse(name == 'Coverage', 0.95, NA)) %>%
+  mutate(name = factor(name, levels = c('Absolute % Bias','Average Variance Estimate', 'Coverage'))) %>%
+  mutate(emp_sd_var_est = ifelse(name == 'Average Variance Estimate', emp_sd_var_est, NA))
+
+
+ggplot(plot_df9, aes(x = as.factor(b3_sd), color = as.factor(delta))) +
+  geom_point(aes(y = value)) +
+  geom_hline(aes(yintercept = yint), linetype = 2) +
+  geom_line(aes(y = value, group = interaction(as.factor(delta), as.factor(name), as.factor(b1)))) +
+  geom_line(aes(y = emp_sd_var_est, group = interaction(as.factor(delta), as.factor(name), as.factor(b1))), linetype = 3) +
+  theme_bw() +
+  labs(x = 'SD of basis coefficient distribution for (t2,T]', y = 'Value', color = expression(delta)) +
+  scale_color_viridis(option = 'magma', begin = 0.2, end = 0.8, discrete = T) +
+  theme(strip.background = element_rect(fill="white"), legend.position = 'bottom') +
+  guides(color = guide_legend(nrow = 1)) +
+  facet_wrap(~as.factor(name), scales = 'free')
+```
+
+# Rate
+
+```{r}
+n_agg_df <- read_rds('simulations/saved_results/n_vary.rds')
+```
+
+### Figure 3
+
+```{r}
+plot_df5 <- n_agg_df %>%
+  mutate('Variance Estimate / Empirical Variance' = var_est/true_var_est, 'Coverage' = ci1) %>%
+  mutate(`log(RMSE)` = log(rmse, 2))%>%
+  pivot_longer(c('log(RMSE)', 'Variance Estimate / Empirical Variance', 'Coverage')) %>%
+  mutate(name = factor(name, levels = c('log(RMSE)', 'Variance Estimate / Empirical Variance', 'Coverage'))) %>%
+  mutate(yint = ifelse(name == 'Coverage', 0.95, 
+                       ifelse(name == 'Variance Estimate / Empirical Variance', 1, NA)))
+
+ggplot(plot_df5, aes(x = log(n, 2), y = value, color = delta)) +
+  geom_point() +
+  geom_hline(aes(yintercept = yint), linetype = 2) +
+  geom_line() +
+  theme_bw() +
+  labs(x = 'Sample size (on log scale)', y = 'Value', color = expression(delta)) +
+  scale_color_viridis(option = 'magma', begin = 0.2, end = 0.8, discrete = T) +
+  theme(strip.background = element_rect(fill="white"), legend.position = 'bottom') +
+  guides(color = guide_legend(nrow = 1)) +
+  scale_x_continuous(breaks = c(10,11,12,13,14,15), labels = c(1000,2000,4000,8000,16000,32000)) +
+  facet_wrap(~name, scales = 'free')
+```
+
+### Supplementary Figure 1
+
+```{r}
+plot_df6 <- n_agg_df %>%
+  mutate('Variance Estimate / Empirical Variance' = var_contrast_est/true_var_contrast_est, 'Coverage' = ci3) %>%
+  mutate(`log(RMSE)` = log(rmse_contrast, 2))%>%
+  pivot_longer(c('log(RMSE)', 'Variance Estimate / Empirical Variance', 'Coverage')) %>%
+  mutate(name = factor(name, levels = c('log(RMSE)', 'Variance Estimate / Empirical Variance', 'Coverage'))) %>%
+  mutate(yint = ifelse(name == 'Coverage', 0.95, 
+                       ifelse(name == 'Variance Estimate / Empirical Variance', 1, NA)))
+
+ggplot(plot_df6, aes(x = log(n, 2), y = value, color = delta)) +
+  geom_point() +
+  geom_hline(aes(yintercept = yint), linetype = 2) +
+  geom_line() +
+  theme_bw() +
+  labs(x = 'Sample size (on log scale)', y = 'Value', color = expression(delta)) +
+  scale_color_viridis(option = 'magma', begin = 0.2, end = 0.8, discrete = T) +
+  theme(strip.background = element_rect(fill="white"), legend.position = 'bottom') +
+  guides(color = guide_legend(nrow = 1)) +
+  scale_x_continuous(breaks = c(10,11,12,13,14,15), labels = c(1000,2000,4000,8000,16000,32000)) +
+  facet_wrap(~name, scales = 'free')
+```

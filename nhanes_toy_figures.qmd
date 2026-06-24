@@ -1,0 +1,310 @@
+---
+title: "nhanes_toy_figs"
+format: html
+editor: visual
+---
+
+```{r}
+library(tidyverse)
+library(refund)
+library(mgcv)
+library(tidyfun)
+library(patchwork)
+library(broom)
+library(viridis)
+library(splines)
+library(splines2)
+library(refundr)
+library(gridExtra)
+library(ggpubr)
+library(pracma)
+```
+
+## Figure 2
+
+```{r}
+all_df <- read_rds('nhanes_analysis/saved_results/nhanes_real_data_clean.rds') %>%
+  mutate(extreme_vals = if_any(c(3:1443), ~.x >60)) %>%
+  filter(extreme_vals == FALSE) %>%
+  dplyr::select(-extreme_vals)
+seqns <- unique(all_df$SEQN)
+
+
+sub_df <- all_df %>%
+  filter(SEQN %in% c(68500,62178,77471)) %>%
+  dplyr::select(seq(1,1441))
+id_vals <- which(all_df$SEQN %in%c(68500,62178,77471))
+mims <- as.matrix(all_df[, 2:1441])
+```
+
+```{r}
+t1 <- 17*60 
+t2 <- 20*60 
+p <- nrow(mims)
+
+fpca_res <- readRDS("nhanes_analysis/saved_results//model_res/fpca_res_5_8.rds")
+fpca_df <- fpca_res[[1]]
+func_pred <- fpca_res[[3]]
+og_seqn <- all_df$SEQN
+```
+
+```{r}
+func_df <- as.data.frame(cbind('SEQN' = all_df$SEQN, 'type'= 'og', func_pred))
+unzip('nhanes_analysis/saved_results/func1_df_5_8.rds.zip', files = 'func1_df_5_8.rds')
+unzip('nhanes_analysis/saved_results/func2_df_5_8.rds.zip', files = 'func2_df_5_8.rds')
+func1_df <- read_rds('func1_df_5_8.rds')
+func2_df <- read_rds('func2_df_5_8.rds')
+```
+
+```{r}
+seqn_select <-  c(68500,62178,77471)
+colnames(func_df)[3:1442] <- seq(1, 1440)
+colnames(func1_df)[3:183] <- seq(t1, t2)
+colnames(func2_df)[3:183] <- seq(t1, t2)
+plot_df <- func_df %>%
+  filter(SEQN %in% seqn_select) %>%
+  pivot_longer(cols = seq(3, 1442))
+plot_df1 <- func1_df %>%
+  filter(SEQN %in% seqn_select) %>%
+  pivot_longer(cols = seq(3, 183))
+plot_df2 <- func2_df %>%
+  filter(SEQN %in% seqn_select) %>%
+  pivot_longer(cols = seq(3, 183))
+plot_df_final <- rbind(plot_df, plot_df1, plot_df2)
+
+
+plot_df_final <- plot_df_final %>%
+  filter(type %in%  c('0.0075', '0.015', '0.0225', 'og') & SEQN ==  68500) %>%
+  mutate(type = ifelse(type == 'og', 'Observed',
+                       ifelse(type == '0.0075', 'q: \U03B4 = 0.0075',
+                       ifelse(type == '0.015', 'q: \U03B4 = 0.015',
+                      ifelse(type == '0.0225', 'q: \U03B4 = 0.0225', type)))))
+
+p3_test <- ggplot(plot_df_final, aes(x = as.numeric(name)/60, y = as.numeric(value), color = type)) +
+  geom_line() +
+  scale_color_manual(values = c('black', magma(3, begin = .4, end = 0.8, direction = 1))) +
+  labs(y = 'Physical Activity', x = 'Time (hours)', color = '') +
+  scale_x_continuous(breaks = c(0,6,12,18,24)) +
+  theme_classic() +
+  theme(legend.position = 'bottom', legend.text = element_text(size = 14))
+legend_toy <- get_legend(p3_test)
+
+
+p3 <- ggplot(plot_df_final, aes(x = as.numeric(name)/60, y = as.numeric(value), color = type)) +
+  geom_line() +
+  scale_color_manual(values = c('black', magma(3, begin = .4, end = 0.8, direction = 1))) +
+  geom_vline(aes(xintercept = 17), color = 'red', linetype = 3, linewidth = 0.7)+
+  geom_vline(aes(xintercept = 20), color = 'red', linetype = 3,, linewidth = 0.7)+
+  labs(y = 'Physical Activity', x = 'Time (hours)', color = '') +
+  ggtitle('Expectaton of the stochastic policy function') +
+  scale_x_continuous(breaks = c(0,6,12,18,24)) +
+  theme_classic() +
+  theme(legend.position = 'none',plot.title = element_text(hjust = 0.5))
+```
+
+```{r}
+mod_df1 <- read_rds('nhanes_analysis/saved_results/model_run_data/mod_df1_5_8.rds')
+mod_df2 <- read_rds('nhanes_analysis/saved_results/model_run_data/mod_df2_5_8.rds')
+dens_mod <- read_rds('nhanes_analysis/saved_results/model_res/density_mod_res_1_5_8.rds')
+pred <- predict(dens_mod, X = mod_df2[, -which(colnames(mod_df2) == 'y' | colnames(mod_df2) == 'coef1_2')], densityOnly = FALSE)
+hat_pi <- pred[[1]]
+design_pts <-pred[[2]]
+
+join_df <- mod_df2 %>%
+  left_join(fpca_df)
+which(join_df$SEQN == 68500)
+
+
+delta <- c(0.0075, 0.015, 0.0225)
+  
+nu2 <- sapply(delta, function(j){
+    nu_vec <- 
+      sum(exp(j*design_pts)*hat_pi[1113,])
+    return(nu_vec)
+  })
+q <- sapply(seq(1, 3), function(j){
+  hat_pi[1113,]*exp(delta[j]*design_pts)/nu2[[j]]
+})
+
+
+q_data <- data.frame('B' = rep(design_pts, 4), 'q' = c(hat_pi[1113,], q[,1], q[,2], q[,3]), type = c(rep('f', length(design_pts)), rep('q: \U03B4 = 0.0075', length(design_pts)),rep('q: \U03B4 = 0.015', length(design_pts)), rep('q: \U03B4 = 0.0225', length(design_pts))))
+
+
+p2 <- ggplot(q_data, aes(x = B, y = q, color = type)) +
+  scale_color_manual(values = c('black', magma(3, begin = .4, end = 0.8, direction = 1))) +
+  theme_classic() +
+  geom_point(aes(x = fpca_df$coef1_2[2218], y = 0), shape = 8, color = 'black') +
+    guides(color = guide_legend(nrow = 2)) +
+  ggtitle('Stochastic policy distribution') +
+  labs(y = 'Density', x = expression(B[1]^(2)), color = '') +
+  theme(legend.position = 'none', plot.title = element_text(hjust = 0.5)) +
+  xlim(-100, 200) +
+  geom_line()
+```
+
+```{r}
+fpca_approx <- func_pred[2218,]
+obs_func <- unlist(all_df[2218, 2:1441])
+
+plot_func_df <- data.frame('pa' = c(obs_func, fpca_approx), 'time' = rep(seq(1, 1440), 2), type = c(rep('Observed function', 1440), rep('Observed FPCA approximation', 1440))) %>%
+  mutate(type = factor(type, levels = c('Observed function', 'Observed FPCA approximation')))
+
+p1 <- ggplot(plot_func_df, aes(x = as.numeric(time)/60, y = pa, color = type, alpha = type)) +
+  geom_line() +
+  scale_color_manual(values = c('grey','black')) +
+  geom_vline(aes(xintercept = 17), color = 'red', linetype = 3, linewidth = 0.7)+
+  geom_vline(aes(xintercept = 20), color = 'red', linetype = 3,, linewidth = 0.7)+
+   labs(y = 'Physical Activity', x = 'Time (hours)', color = '') +
+  scale_x_continuous(breaks = c(0,6,12,18,24)) +
+  ggtitle('Observed function and FPCA approximation') +
+  scale_alpha_manual(values = c(0.4, 1)) +
+  theme_classic() +
+  theme(legend.position = 'none', plot.title = element_text(hjust = 0.5))
+```
+
+```{r}
+gamma_x <- function(x, t1, t2){
+  (((x-t1)/(t2 - t1))^1.5)*(((t2-x)/(t2 - t1)))
+}
+t1 <- 60*17
+t2 <- 60*20
+func <- gramSchmidt(as.matrix(gamma_x( seq(t1, t2), t1, t2)))$Q
+
+toy_df <- data.frame('x' = seq(t1, t2)/60, 'y' = func )
+
+p4 <- ggplot(toy_df, aes(x =x, y = y)) +
+  geom_line() +
+  theme_classic() +
+  ggtitle('Policy basis') +
+  theme(legend.position = 'none', plot.title = element_text(hjust = 0.5)) +
+  labs(x = 'Time (hours)', y = 'Physical Activity')
+```
+
+```{r}
+layout <- matrix(c(1, 1,1,1,4,4,4,3,3,3,3,
+                   1, 1,1,1,4,4,4,3,3,3,3,
+                   1, 1,1,1,2,2,2,3,3,3,3,
+                   1, 1,1,1,2,2,2,3,3,3,3,
+                   1, 1,1,1,2,2,2,3,3,3,3,
+                   5, 5,5,5,5,5,5,5,5,5,5), nrow = 6, byrow = TRUE)
+p_final <- grid.arrange(p1, p2, p3,p4, legend_toy, layout_matrix = layout)
+plot(p_final)
+```
+
+## Figure 1
+
+```{r}
+plot_df <- all_df %>%
+  filter(SEQN %in% c(68500,62178,77471)) %>%
+  dplyr::select(seq(1,1441)) %>%
+  pivot_longer(cols = 2:1441) %>%
+  mutate(name = as.numeric(name)) %>%
+  rename(id = SEQN) %>%
+  mutate(name = name/60) %>%
+  mutate(type = ifelse(name < 15, '[0, t1)',
+                       ifelse(name <= 19, '[t1, t2]', '(t2, T]'))) %>%
+  mutate(type = factor(type, levels = c('[0, t1)', '[t1, t2]', '(t2, T]')))
+```
+
+```{r}
+new_df <- plot_df %>%
+  group_by(id) %>%
+  mutate(smooth_value = smooth.spline(value, spar = 0.8)$y)
+
+
+p1 <- ggplot(new_df, aes(x = name, y = smooth_value, group = id)) +
+  geom_line(color = 'black', linewidth = 1.2) +
+  geom_vline(aes(xintercept = 15), color = 'red', linetype = 2, linewidth = 0.8)+
+  geom_vline(aes(xintercept = 19), color = 'red', linetype = 2,, linewidth = 0.8)+
+  theme_classic() +
+  ylim(0, 33) +
+  labs(y = 'Physical activity', x = 'Time (hours)') +
+  ggtitle('Observed function') +
+  theme(legend.position = 'none', plot.title = element_text(hjust = 0.5)) 
+p1
+```
+
+```{r}
+gamma_x <- function(x, t1, t2){
+  50*(((x-t1)/(t2 - t1))^4)*(((t2-x)/(t2 - t1))^4)
+}
+int2 <- new_df %>%
+  ungroup() %>%
+  filter(type == '[t1, t2]') %>%
+  dplyr::select(name) %>%
+  unique() %>%
+  pull(name) 
+t1 <- 15
+t2 <- 19
+```
+
+```{r}
+gamma1 <- rep(c(rep(NA, 15*60-1), gamma_x(int2, t1, t2), rep(NA, 24*60 - 19*60)), 3)
+new_df2 <- new_df %>%
+  ungroup() %>%
+  mutate(gamma1 = gamma1) %>%
+  mutate(obs_mean = ifelse(id == 62178 & type == '[t1, t2]', smooth_value +5*gamma1,
+                           ifelse(id == 68500 & type == '[t1, t2]', smooth_value -5*gamma1,
+                                  ifelse(id == 77471 & type == '[t1, t2]', smooth_value -10*gamma1, NA)))) %>%
+  mutate(ub = ifelse(id == 62178 & type == '[t1, t2]', obs_mean + 15*gamma1,
+                           ifelse(id == 68500 & type == '[t1, t2]', obs_mean + 20*gamma1,
+                                  ifelse(id == 77471 & type == '[t1, t2]', obs_mean + 25*gamma1, NA)))) %>%
+   mutate(lb = ifelse(id == 62178 & type == '[t1, t2]', obs_mean - 15*gamma1,
+                           ifelse(id == 68500 & type == '[t1, t2]', obs_mean - 20*gamma1,
+                                  ifelse(id == 77471 & type == '[t1, t2]', obs_mean - 25*gamma1, NA))))
+
+
+p2 <- ggplot(new_df2, aes(x = name, y = smooth_value, group = id)) +
+  geom_line(color = 'black', linewidth = 1.2) +
+  geom_line(aes(y = obs_mean), color = 'grey50', linewidth = 1.2) + 
+  geom_ribbon(aes(ymin = lb, ymax = ub), alpha = 0.2, color = 'grey50') +
+  geom_vline(aes(xintercept = 15), color = 'red', linetype = 2, linewidth = 0.8)+
+  geom_vline(aes(xintercept = 19), color = 'red', linetype = 2,, linewidth = 0.8)+
+  theme_classic() +
+  xlim(14, 20) +
+  ylim(0, 33) +
+  labs(y = 'Physical activity', x = 'Time (hours)') +
+  ggtitle('Observed distribution over [t1, t2]') +
+  theme(legend.position = 'none',  plot.title = element_text(hjust = 0.5)) 
+p2
+```
+
+```{r}
+new_df3 <- new_df %>%
+  ungroup() %>%
+  mutate(gamma1 = gamma1) %>%
+  mutate(obs_mean = ifelse(id == 62178 & type == '[t1, t2]', smooth_value +5*gamma1,
+                           ifelse(id == 68500 & type == '[t1, t2]', smooth_value -5*gamma1,
+                                  ifelse(id == 77471 & type == '[t1, t2]', smooth_value -10*gamma1, NA)))) %>%
+  mutate(new_mean = ifelse(id == 62178 & type == '[t1, t2]', obs_mean +8*gamma1,
+                           ifelse(id == 68500 & type == '[t1, t2]', obs_mean + 18*gamma1,
+                                  ifelse(id == 77471 & type == '[t1, t2]', obs_mean +23*gamma1, NA)))) %>%
+  mutate(ub = ifelse(id == 62178 & type == '[t1, t2]', new_mean + 15*gamma1,
+                           ifelse(id == 68500 & type == '[t1, t2]', new_mean + 20*gamma1,
+                                  ifelse(id == 77471 & type == '[t1, t2]', new_mean + 25*gamma1, NA)))) %>%
+   mutate(lb = ifelse(id == 62178 & type == '[t1, t2]', new_mean - 15*gamma1,
+                           ifelse(id == 68500 & type == '[t1, t2]', new_mean - 20*gamma1,
+                                  ifelse(id == 77471 & type == '[t1, t2]', new_mean - 25*gamma1, NA))))
+
+
+
+p3 <- ggplot(new_df3, aes(x = name, y = smooth_value, group = id)) +
+  geom_line(color = 'black', linewidth = 1.2) +
+  geom_line(aes(y = new_mean), color = 'red', linewidth = 1.2) + 
+  geom_ribbon(aes(ymin = lb, ymax = ub), alpha = 0.2, color = 'red') +
+  geom_vline(aes(xintercept = 15), color = 'red', linetype = 2, linewidth = 0.8)+
+  geom_vline(aes(xintercept = 19), color = 'red', linetype = 2,, linewidth = 0.8)+
+  theme_classic() +
+  xlim(14, 20) +
+  ylim(0, 33) +
+  labs(y = 'Physical activity', x = 'Time (hours)') +
+  ggtitle('Stochastic policy over [t1, t2]') +
+  theme(legend.position = 'none', plot.title = element_text(hjust = 0.5)) 
+p3
+```
+
+```{r}
+layout <- matrix(c(1,1,1,2,2,3,3), nrow = 1, byrow = TRUE)
+p_toy <- grid.arrange(p1, p2, p3, layout_matrix = layout)
+plot(p_toy)
+```

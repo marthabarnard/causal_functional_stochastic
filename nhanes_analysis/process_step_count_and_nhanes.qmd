@@ -1,0 +1,430 @@
+---
+title: "process_step_count_and_nhanes"
+format: html
+editor: visual
+---
+
+```{r}
+library(tidyverse)
+library(refund)
+library(mgcv)
+library(tidyfun)
+library(patchwork)
+library(broom)
+library(viridis)
+library(splines)
+library(splines2)
+library(refundr)
+library(adept)
+library(pracma)
+library(LinCDE)
+library(gridExtra)
+```
+
+```{r}
+all_df <- read_rds('saved_results/nhanes_real_data_clean.rds') %>%
+  mutate(extreme_vals = if_any(c(3:1443), ~.x >60)) %>%
+  filter(extreme_vals == FALSE) %>%
+  dplyr::select(-extreme_vals)
+```
+
+### Prep step count data to join
+
+[https://physionet.org/files/minute-level-step-count-nhanes/1.0.1/csv/nhanes_1440_oaksteps.csv.xz](https://physionet.org/files/minute-level-step-count-nhanes/1.0.1/csv/nhanes_1440_oaksteps.csv.xz?download)
+
+```{r}
+step_data <- read_csv("https://physionet.org/files/minute-level-step-count-nhanes/1.0.1/csv/nhanes_1440_oaksteps.csv.xz")
+
+mims_id <- rbind(read_rds('saved_results/mims_id_1.rds'), read_rds('saved_results/mims_id_2.rds')) %>%
+  mutate(fake = seq(1, 81676)) %>%
+  mutate(PAXDAYM = as.double(PAXDAYM ))
+
+step_data_correct_ids <- step_data %>%
+  left_join(mims_id) %>%
+  filter(is.na(fake) == FALSE)
+
+step_data_agg <- step_data_correct_ids %>%
+  dplyr::select(-fake, - PAXDAYM, - PAXDAYWM) %>%
+  group_by(SEQN) %>%
+  summarise_at(colnames(step_data)[4:1443], mean)
+step_data_agg <- step_data_agg %>%
+  filter(SEQN %in% all_df$SEQN)
+```
+
+```{r}
+delta_vec <- c(seq(0.005, 0.05, by = 0.0025))
+```
+
+### 7AM-10AM join
+
+```{r}
+t1 <- 60*7
+t2 <- 60*10
+gamma_x <- function(x, t1, t2){
+  (((x-t1)/(t2 - t1)))*(((t2-x)/(t2 - t1))^3)
+}
+fpca_res <- readRDS("saved_results/model_res/fpca_res_7_10.rds")
+func_pred <- fpca_res[[3]]
+func_df <- as.data.frame(cbind('SEQN' = all_df$SEQN, 'type'= 'og', func_pred))
+```
+
+```{r}
+mod_df1 <- read_rds('saved_results/model_run_data/mod_df1_7_10.rds')
+mod_df2 <- read_rds('saved_results/model_run_data/mod_df2_7_10.rds')
+dens_mod <- read_rds('saved_results/model_res/density_mod_res_1_7_10.rds')
+pred <- predict(dens_mod, X = mod_df2[, -which(colnames(mod_df2) == 'y' | colnames(mod_df2) == 'coef1_2')], densityOnly = FALSE)
+hat_pi <- pred[[1]]
+design_pts <- pred[[2]]
+og_mean <- sapply(seq(1, nrow(hat_pi)), function(x){
+  sum(design_pts*hat_pi[x,])/(mean(hat_pi[x,])*(design_pts[length(design_pts)] - design_pts[1]))
+})
+
+dens_mod2 <- read_rds('saved_results/model_res/density_mod_res_2_7_10.rds')
+pred2 <- predict(dens_mod2, X = mod_df1[, -which(colnames(mod_df1) == 'y' | colnames(mod_df1) == 'coef1_2')], densityOnly = FALSE)
+hat_pi2 <- pred2[[1]]
+design_pts2 <- pred2[[2]]
+og_mean2 <- sapply(seq(1, nrow(hat_pi2)), function(x){
+  sum(design_pts2*hat_pi2[x,])/(mean(hat_pi2[x,])*(design_pts2[length(design_pts2)] - design_pts2[1]))
+})
+```
+
+```{r}
+fpca_res <- readRDS("saved_results/model_res/fpca_res_7_10.rds")
+fpca_df <- fpca_res[[1]]
+func_pred <- fpca_res[[3]]
+og_seqn <- all_df$SEQN
+res1 <- read_rds('saved_results/model_res/mods1_7_10.rds')
+res2 <- read_rds('saved_results/model_res/mods2_7_10.rds')
+
+mu_q_mean1 <- do.call(cbind, res1$mu_q_mean)
+colnames(mu_q_mean1) <- delta_vec
+mu_q_mean2 <- do.call(cbind, res2$mu_q_mean)
+colnames(mu_q_mean2) <- delta_vec
+
+seqn1 <- mod_df1 %>%
+  left_join(fpca_df) %>%
+  dplyr::select(SEQN, coef1_2) %>%
+  cbind('est_mean' = og_mean2) %>%
+  cbind(mu_q_mean2)
+
+seqn2 <- mod_df2 %>%
+  left_join(fpca_df) %>%
+  dplyr::select(SEQN, coef1_2) %>%
+  cbind('est_mean' = og_mean) %>%
+  cbind(mu_q_mean1)
+```
+
+```{r}
+func1 <- lapply(seq(1, nrow(seqn1)), function(j){
+  seqn_i <- seqn1$SEQN[j]
+  k <- which(og_seqn == seqn_i)
+  func <- func_pred[k,]
+  base <- func[t1:t2] - seqn1$coef1_2[j]*gamma_x(seq(t1, t2), t1, t2)
+  new_funcs <- t(sapply(colnames(seqn1)[3:11], function(x){
+    c(base + seqn1[j,x]*gamma_x(seq(t1, t2), t1, t2))
+  }))
+  new_funcs <- cbind('SEQN' = seqn_i, 'type' = colnames(seqn1)[3:11], new_funcs)
+  return(new_funcs)
+  rownames(new_funcs) <- NULL
+})
+func1_df <- as.data.frame(do.call(rbind, func1))
+
+func2 <- lapply(seq(1, nrow(seqn2)), function(j){
+  seqn_i <- seqn2$SEQN[j]
+  k <- which(og_seqn == seqn_i)
+  func <- func_pred[k,]
+  base <- func[t1:t2] - seqn2$coef1_2[j]*gamma_x(seq(t1, t2), t1, t2)
+  new_funcs <- t(sapply(colnames(seqn2)[3:11], function(x){
+    c(base + seqn2[j,x]*gamma_x(seq(t1, t2), t1, t2))
+  }))
+  new_funcs <- cbind('SEQN' = seqn_i, 'type' = colnames(seqn2)[3:11], new_funcs)
+  rownames(new_funcs) <- NULL
+  return(new_funcs)
+})
+func2_df <- as.data.frame(do.call(rbind, func2))
+```
+
+```{r}
+func1_df_long <- func1_df %>%
+  pivot_longer(cols = seq(3, 183))
+func1_df_mean <- func1_df_long %>%
+  filter(type == 'est_mean') %>%
+  dplyr::select(-type) %>%
+  rename(mean_value = value)
+func1_df_long <- func1_df_long %>%
+  left_join(func1_df_mean)
+
+func2_df_long <- func2_df %>%
+  pivot_longer(cols = seq(3, 183))
+func2_df_mean <- func2_df_long %>%
+  filter(type == 'est_mean') %>%
+  dplyr::select(-type) %>%
+  rename(mean_value = value)
+func2_df_long <- func2_df_long %>%
+  left_join(func2_df_mean)
+
+step_data_7_10 <- as.data.frame(cbind('SEQN' = step_data_agg$SEQN, 'steps' = rowSums(step_data_agg[,(t1+1):(t2+1)])))
+og_func_7_10 <- as.data.frame(cbind('SEQN' = all_df$SEQN, 'MIMS' = rowSums(all_df[,(t1+1):(t2+1)])))
+step_mims_7_10 <- full_join(step_data_7_10, og_func_7_10) %>%
+  mutate(scale_factor = steps/MIMS) %>%
+  mutate(SEQN = as.character(SEQN))
+
+
+agg_df_7_10 <- rbind(func1_df_long, func2_df_long) %>%
+  group_by(SEQN, type) %>%
+  summarise('mean_diff' =mean(as.numeric(value) - as.numeric(mean_value)), 'sum_diff' = sum(as.numeric(value) - as.numeric(mean_value))) %>%
+  left_join(step_mims_7_10) %>%
+  mutate('step_diff' = scale_factor*sum_diff)
+write_rds(agg_df_7_10, 'saved_results/step_data_7_10.rds')
+```
+
+### 1PM-4PM join
+
+```{r}
+t1 <- 60*13
+t2 <- 60*16
+gamma_x <- function(x, t1, t2){
+  (((x-t1)/(t2 - t1)))*(((t2-x)/(t2 - t1)))
+}
+fpca_res <- readRDS("saved_results/model_res/fpca_res_1_4.rds")
+func_pred <- fpca_res[[3]]
+func_df <- as.data.frame(cbind('SEQN' = all_df$SEQN, 'type'= 'og', func_pred))
+```
+
+```{r}
+mod_df1 <- read_rds('saved_results/model_run_data/mod_df1_1_4.rds')
+mod_df2 <- read_rds('saved_results/model_run_data/mod_df2_1_4.rds')
+dens_mod <- read_rds('saved_results/model_res/density_mod_res_1_1_4.rds')
+pred <- predict(dens_mod, X = mod_df2[, -which(colnames(mod_df2) == 'y' | colnames(mod_df2) == 'coef1_2')], densityOnly = FALSE)
+hat_pi <- pred[[1]]
+design_pts <- pred[[2]]
+og_mean <- sapply(seq(1, nrow(hat_pi)), function(x){
+  sum(design_pts*hat_pi[x,])/(mean(hat_pi[x,])*(design_pts[length(design_pts)] - design_pts[1]))
+})
+
+dens_mod2 <- read_rds('saved_results/model_res/density_mod_res_2_1_4.rds')
+pred2 <- predict(dens_mod2, X = mod_df1[, -which(colnames(mod_df1) == 'y' | colnames(mod_df1) == 'coef1_2')], densityOnly = FALSE)
+hat_pi2 <- pred2[[1]]
+design_pts2 <- pred2[[2]]
+og_mean2 <- sapply(seq(1, nrow(hat_pi2)), function(x){
+  sum(design_pts2*hat_pi2[x,])/(mean(hat_pi2[x,])*(design_pts2[length(design_pts2)] - design_pts2[1]))
+})
+```
+
+```{r}
+fpca_res <- readRDS("saved_results/model_res/fpca_res_1_4.rds")
+fpca_df <- fpca_res[[1]]
+func_pred <- fpca_res[[3]]
+og_seqn <- all_df$SEQN
+res1 <- read_rds('saved_results/model_res/mods1_1_4.rds')
+res2 <- read_rds('saved_results/model_res/mods2_1_4.rds')
+
+mu_q_mean1 <- do.call(cbind, res1$mu_q_mean)
+colnames(mu_q_mean1) <- delta_vec
+mu_q_mean2 <- do.call(cbind, res2$mu_q_mean)
+colnames(mu_q_mean2) <- delta_vec
+
+seqn1 <- mod_df1 %>%
+  left_join(fpca_df) %>%
+  dplyr::select(SEQN, coef1_2) %>%
+  cbind('est_mean' = og_mean2) %>%
+  cbind(mu_q_mean2)
+
+seqn2 <- mod_df2 %>%
+  left_join(fpca_df) %>%
+  dplyr::select(SEQN, coef1_2) %>%
+  cbind('est_mean' = og_mean) %>%
+  cbind(mu_q_mean1)
+```
+
+```{r}
+func1 <- lapply(seq(1, nrow(seqn1)), function(j){
+  seqn_i <- seqn1$SEQN[j]
+  k <- which(og_seqn == seqn_i)
+  func <- func_pred[k,]
+  base <- func[t1:t2] - seqn1$coef1_2[j]*gamma_x(seq(t1, t2), t1, t2)
+  new_funcs <- t(sapply(colnames(seqn1)[3:11], function(x){
+    c(base + seqn1[j,x]*gamma_x(seq(t1, t2), t1, t2))
+  }))
+  new_funcs <- cbind('SEQN' = seqn_i, 'type' = colnames(seqn1)[3:11], new_funcs)
+  return(new_funcs)
+  rownames(new_funcs) <- NULL
+})
+func1_df <- as.data.frame(do.call(rbind, func1))
+
+func2 <- lapply(seq(1, nrow(seqn2)), function(j){
+  seqn_i <- seqn2$SEQN[j]
+  k <- which(og_seqn == seqn_i)
+  func <- func_pred[k,]
+  base <- func[t1:t2] - seqn2$coef1_2[j]*gamma_x(seq(t1, t2), t1, t2)
+  new_funcs <- t(sapply(colnames(seqn2)[3:11], function(x){
+    c(base + seqn2[j,x]*gamma_x(seq(t1, t2), t1, t2))
+  }))
+  new_funcs <- cbind('SEQN' = seqn_i, 'type' = colnames(seqn2)[3:11], new_funcs)
+  rownames(new_funcs) <- NULL
+  return(new_funcs)
+})
+func2_df <- as.data.frame(do.call(rbind, func2))
+```
+
+```{r}
+func1_df_long <- func1_df %>%
+  pivot_longer(cols = seq(3, 183))
+func1_df_mean <- func1_df_long %>%
+  filter(type == 'est_mean') %>%
+  dplyr::select(-type) %>%
+  rename(mean_value = value)
+func1_df_long <- func1_df_long %>%
+  left_join(func1_df_mean)
+
+func2_df_long <- func2_df %>%
+  pivot_longer(cols = seq(3, 183))
+func2_df_mean <- func2_df_long %>%
+  filter(type == 'est_mean') %>%
+  dplyr::select(-type) %>%
+  rename(mean_value = value)
+func2_df_long <- func2_df_long %>%
+  left_join(func2_df_mean)
+
+
+step_data_1_4 <- as.data.frame(cbind('SEQN' = step_data_agg$SEQN, 'steps' = rowSums(step_data_agg[,(t1+1):(t2+1)])))
+og_func_1_4 <- as.data.frame(cbind('SEQN' = all_df$SEQN, 'MIMS' = rowSums(all_df[,(t1+1):(t2+1)])))
+step_mims_1_4 <- full_join(step_data_1_4, og_func_1_4) %>%
+  mutate(scale_factor = steps/MIMS) %>%
+  mutate(SEQN = as.character(SEQN))
+
+
+agg_df_1_4 <- rbind(func1_df_long, func2_df_long) %>%
+  group_by(SEQN, type) %>%
+  summarise('mean_diff' =mean(as.numeric(value) - as.numeric(mean_value)), 'sum_diff' = sum(as.numeric(value) - as.numeric(mean_value))) %>%
+  left_join(step_mims_1_4) %>%
+  mutate('step_diff' = scale_factor*sum_diff)
+write_rds(agg_df_1_4, 'saved_results/step_data_1_4.rds')
+```
+
+### 5PM-8PM join
+
+```{r}
+t1 <- 60*17
+t2 <- 60*20
+gamma_x <- function(x, t1, t2){
+  (((x-t1)/(t2 - t1))^1.5)*(((t2-x)/(t2 - t1)))
+}
+fpca_res <- readRDS("saved_results/model_res/fpca_res_5_8.rds")
+func_pred <- fpca_res[[3]]
+func_df <- as.data.frame(cbind('SEQN' = all_df$SEQN, 'type'= 'og', func_pred))
+```
+
+```{r}
+mod_df1 <- read_rds('saved_results/model_run_data/mod_df1_5_8.rds')
+mod_df2 <- read_rds('saved_results/model_run_data/mod_df2_5_8.rds')
+dens_mod <- read_rds('saved_results/model_res/density_mod_res_1_5_8.rds')
+pred <- predict(dens_mod, X = mod_df2[, -which(colnames(mod_df2) == 'y' | colnames(mod_df2) == 'coef1_2')], densityOnly = FALSE)
+hat_pi <- pred[[1]]
+design_pts <- pred[[2]]
+og_mean <- sapply(seq(1, nrow(hat_pi)), function(x){
+  sum(design_pts*hat_pi[x,])/(mean(hat_pi[x,])*(design_pts[length(design_pts)] - design_pts[1]))
+})
+
+dens_mod2 <- read_rds('saved_results/model_res/density_mod_res_2_5_8.rds')
+pred2 <- predict(dens_mod2, X = mod_df1[, -which(colnames(mod_df1) == 'y' | colnames(mod_df1) == 'coef1_2')], densityOnly = FALSE)
+hat_pi2 <- pred2[[1]]
+design_pts2 <- pred2[[2]]
+og_mean2 <- sapply(seq(1, nrow(hat_pi2)), function(x){
+  sum(design_pts2*hat_pi2[x,])/(mean(hat_pi2[x,])*(design_pts2[length(design_pts2)] - design_pts2[1]))
+})
+```
+
+```{r}
+fpca_res <- readRDS("saved_results/model_res/fpca_res_5_8.rds")
+fpca_df <- fpca_res[[1]]
+func_pred <- fpca_res[[3]]
+og_seqn <- all_df$SEQN
+res1 <- read_rds('saved_results/model_res/mods1_5_8.rds')
+res2 <- read_rds('saved_results/model_res/mods2_5_8.rds')
+
+mu_q_mean1 <- do.call(cbind, res1$mu_q_mean)
+colnames(mu_q_mean1) <- delta_vec
+mu_q_mean2 <- do.call(cbind, res2$mu_q_mean)
+colnames(mu_q_mean2) <- delta_vec
+
+seqn1 <- mod_df1 %>%
+  left_join(fpca_df) %>%
+  dplyr::select(SEQN, coef1_2) %>%
+  cbind('est_mean' = og_mean2) %>%
+  cbind(mu_q_mean2)
+
+seqn2 <- mod_df2 %>%
+  left_join(fpca_df) %>%
+  dplyr::select(SEQN, coef1_2) %>%
+  cbind('est_mean' = og_mean) %>%
+  cbind(mu_q_mean1)
+```
+
+```{r}
+func1 <- lapply(seq(1, nrow(seqn1)), function(j){
+  seqn_i <- seqn1$SEQN[j]
+  k <- which(og_seqn == seqn_i)
+  func <- func_pred[k,]
+  base <- func[t1:t2] - seqn1$coef1_2[j]*gamma_x(seq(t1, t2), t1, t2)
+  new_funcs <- t(sapply(colnames(seqn1)[3:11], function(x){
+    c(base + seqn1[j,x]*gamma_x(seq(t1, t2), t1, t2))
+  }))
+  new_funcs <- cbind('SEQN' = seqn_i, 'type' = colnames(seqn1)[3:11], new_funcs)
+  return(new_funcs)
+  rownames(new_funcs) <- NULL
+})
+func1_df <- as.data.frame(do.call(rbind, func1))
+
+func2 <- lapply(seq(1, nrow(seqn2)), function(j){
+  seqn_i <- seqn2$SEQN[j]
+  k <- which(og_seqn == seqn_i)
+  func <- func_pred[k,]
+  base <- func[t1:t2] - seqn2$coef1_2[j]*gamma_x(seq(t1, t2), t1, t2)
+  new_funcs <- t(sapply(colnames(seqn2)[3:11], function(x){
+    c(base + seqn2[j,x]*gamma_x(seq(t1, t2), t1, t2))
+  }))
+  new_funcs <- cbind('SEQN' = seqn_i, 'type' = colnames(seqn2)[3:11], new_funcs)
+  rownames(new_funcs) <- NULL
+  return(new_funcs)
+})
+func2_df <- as.data.frame(do.call(rbind, func2))
+write_rds(func1_df, 'saved_results/func1_df_5_8.rds')
+write_rds(func2_df, 'saved_results/func2_df_5_8.rds')
+```
+
+```{r}
+func1_df_long <- func1_df %>%
+  pivot_longer(cols = seq(3, 183))
+func1_df_mean <- func1_df_long %>%
+  filter(type == 'est_mean') %>%
+  dplyr::select(-type) %>%
+  rename(mean_value = value)
+func1_df_long <- func1_df_long %>%
+  left_join(func1_df_mean)
+
+func2_df_long <- func2_df %>%
+  pivot_longer(cols = seq(3, 183))
+func2_df_mean <- func2_df_long %>%
+  filter(type == 'est_mean') %>%
+  dplyr::select(-type) %>%
+  rename(mean_value = value)
+func2_df_long <- func2_df_long %>%
+  left_join(func2_df_mean)
+
+
+step_data_5_8 <- as.data.frame(cbind('SEQN' = step_data_agg$SEQN, 'steps' = rowSums(step_data_agg[,(t1+1):(t2+1)])))
+og_func_5_8 <- as.data.frame(cbind('SEQN' = all_df$SEQN, 'MIMS' = rowSums(all_df[,(t1+1):(t2+1)])))
+step_mims_5_8 <- full_join(step_data_5_8, og_func_5_8) %>%
+  mutate(scale_factor = steps/MIMS) %>%
+  mutate(SEQN = as.character(SEQN))
+
+
+
+agg_df_5_8 <- rbind(func1_df_long, func2_df_long) %>%
+  group_by(SEQN, type) %>%
+  summarise('mean_diff' =mean(as.numeric(value) - as.numeric(mean_value)), 'sum_diff' = sum(as.numeric(value) - as.numeric(mean_value))) %>%
+  left_join(step_mims_5_8) %>%
+  mutate('step_diff' = scale_factor*sum_diff)
+write_rds(agg_df_5_8, 'saved_results/step_data_5_8.rds')
+```
