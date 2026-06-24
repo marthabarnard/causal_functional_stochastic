@@ -31,8 +31,6 @@ names_short <- c('PAXMIN_G.xpt', 'PAXMIN_H.xpt')
 ```{r}
 sim.data1 <- read_rds('2011_2012_min_data.rds')
 sim.data2 <- read_rds('2013_2014_min_data.rds')
-#intersection is 0 so can aggregate separately
-#intersect(unique(sim.data1$SEQN), unique(sim.data2$SEQN))
 df_list <- list(sim.data1, sim.data2)
 for(i in seq(1,2)){
   sim.data <- df_list[[i]]
@@ -174,7 +172,6 @@ alc <- rbind(alc_201112, alc_201314 ) %>%
          alc110_NA = ifelse(is.na(ALQ110) | ALQ110 == 7 | ALQ110 == 9,1, 0),
          alc120_NA = ifelse(is.na(ALQ120Q) | ALQ120Q == 777 | ALQ120Q == 999,1, 0),
          alc130_NA = ifelse(is.na(ALQ130) | ALQ130 == 777 | ALQ130 == 999,1, 0)) %>%
-  #filter(ALQ101 == 1 & alc130_NA == 1)
   mutate(drink_never = ifelse(alc101_NA ==1 | (ALQ101 == 2 & alc110_NA == 1) |(ALQ101 == 1 & alc120_NA == 1),NA, ifelse(ALQ101 == 2 & ALQ110 ==2, 1, 0)),
          drink_former = ifelse(alc101_NA ==1 | (ALQ101 == 2 & alc110_NA == 1) | (ALQ101 == 1 & alc120_NA == 1),NA, ifelse(ALQ101 == 2 & ALQ110 ==1, 1, 0)),
          drink_mod = ifelse(alc101_NA ==1 | (ALQ101 == 2 & alc110_NA == 1) | (ALQ101 == 1 & alc120_NA == 1),NA, ifelse(drink_never == 1 | drink_former == 1, 0, ifelse(alc130_NA == 1 & alc120_NA == 0,1, ifelse(ALQ130 <= 1 & gender == 1, 1, ifelse(ALQ130 <= 2 & gender == 0,1, 0))))),
@@ -248,7 +245,6 @@ mort201314 <- read_fwf(
            permth_exm = c(46,48)),
   na = c("", "."))
 
-#we will do 5 yr mortality, so anyone where PERMTH_INT > 60 we have to make mortality 0
 mort <- rbind(mort201112, mort201314) %>%
   mutate(mort5yr= ifelse(is.na(mortstat), NA, ifelse(mortstat ==0, 0, ifelse(mortstat ==1 & permth_int > 60, 0, 1)))) %>%
   dplyr::select(SEQN, mort5yr)
@@ -268,5 +264,5 @@ all_df <- mims_df %>%
   left_join(smoking, by = 'SEQN') %>%
   left_join(phys, by = 'SEQN') %>%
   drop_na()
-#write_rds(all_df, 'nhanes_real_data_clean.rds')
+#write_rds(all_df, 'saved_results/nhanes_real_data_clean.rds')
 ```
