@@ -21,7 +21,7 @@ The folders simulations/ and nhanes_analysis/ contain the code to re-run all ana
 
 
 ## Data
-All data files are linked in the `nhanes_analysis/process_` files however the core files are:
+All data files are linked in the `nhanes_analysis/process_` files however the core data files are:
 * Acceleromter data: https://ftp.cdc.gov/pub/NHANES/LargeDataFiles/PAXMIN_G.xpt
 * Acceleromter data: https://ftp.cdc.gov/pub/NHANES/LargeDataFiles/PAXMIN_H.xpt
 * Step count data: https://physionet.org/files/minute-level-step-count-nhanes/1.0.1/csv/nhanes_1440_oaksteps.csv.xz
