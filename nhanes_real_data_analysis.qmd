@@ -47,7 +47,7 @@ pfr_mort_fit =
     family = binomial(), method = "REML", data = df)
 ```
 
-## Supplementary Figure 9
+## Supplementary Figure 8
 
 ```{r}
 pfr_mort_inf_df = 
@@ -256,7 +256,7 @@ plot_df3 <- as.data.frame(res_df) %>%
   mutate(type = factor(type, levels = c('7AM-10AM', '1PM-4PM', '5PM-8PM'))) 
 ```
 
-## Supplementary Figure 10
+## Supplementary Figure 9
 
 ```{r}
 p1 <- ggplot(plot_df1, aes(x = as.numeric(delta_vec), y = as.numeric(est), color = type, fill = type)) +
@@ -303,7 +303,7 @@ p_final2 <- grid.arrange(p4, p5, ncol=1)
 p_final2
 ```
 
-## Supplementary Figure 11
+## Supplementary Figure 10
 
 ```{r}
 cov_join <- all_df %>%
