@@ -1,5 +1,5 @@
 # Code and data for Causal Inference for Functional Treatments with Stochastic Policies
-By Martha Barnard, Jared D. Huling, and Julian Wolfson
+By Martha Barnard, Jared D. Huling, and Julian Wolfson (https://arxiv.org/abs/2606.27518)
 
 ## Code
  R version 4.4.0 and 4.5.0 was used for all analysis
